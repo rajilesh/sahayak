@@ -229,6 +229,23 @@
 
     <!-- ── OLLAMA PANEL ── -->
     <div class="prov-panel" id="panel-ollama">
+      <!-- Local Ollama URL (visible always — even on Render the browser hits the user's local Ollama) -->
+      <div class="modal-section">
+        <div class="modal-section-label" style="display:flex;align-items:center;justify-content:space-between">
+          Local Ollama URL
+          <span class="prov-status" id="ollama-bridge-status" style="margin:0"></span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="ollama-url-input" type="url" placeholder="http://localhost:11434"
+            style="flex:1;padding:8px 12px;border:1.5px solid var(--line);border-radius:10px;font-size:0.82rem;outline:none;font-family:ui-monospace,monospace">
+          <button class="ghost-sm" id="ollama-url-save-btn">Test</button>
+        </div>
+        <div id="ollama-cors-notice" class="modal-note" style="margin-top:8px" hidden>
+          🛡 To let this hosted page reach your local Ollama, start it with CORS enabled:<br>
+          <code style="display:inline-block;margin-top:4px;padding:4px 8px;background:#f4f4f5;border-radius:6px;font-size:0.78rem">OLLAMA_ORIGINS='*' ollama serve</code>
+        </div>
+      </div>
+
       <div class="modal-section">
         <div class="modal-section-label" style="display:flex;align-items:center;justify-content:space-between">
           Installed Models
@@ -294,12 +311,31 @@
           <div class="prov-info-icon">🌐</div>
           <div>
             <div class="prov-info-title">Chrome Built-in AI (Gemini Nano)</div>
-            <div class="prov-info-desc">Runs Gemini Nano entirely inside Chrome. No Ollama needed — zero data leaves the browser.</div>
+            <div class="prov-info-desc">Runs Gemini Nano entirely inside Chrome. No server needed — zero data leaves the browser.</div>
           </div>
         </div>
         <div id="chrome-ai-status" class="prov-status"></div>
         <div id="chrome-ai-actions"></div>
-        <div class="modal-note" style="margin-top:10px">Requires Chrome 127+ with <code>chrome://flags/#prompt-api-for-gemini-nano</code> enabled.</div>
+
+        <!-- Download progress for Chrome AI -->
+        <div id="chrome-dl-wrap" class="dl-progress-wrap" hidden style="margin-top:12px">
+          <div class="dl-progress-header">
+            <span id="chrome-dl-label">Downloading Gemini Nano…</span>
+            <span id="chrome-dl-pct" class="dl-progress-size">0%</span>
+          </div>
+          <div class="dl-progress-track">
+            <div class="dl-progress-fill" id="chrome-dl-fill"></div>
+          </div>
+          <div class="dl-progress-status">~2 GB · this happens once. The model lives inside Chrome.</div>
+        </div>
+
+        <div class="modal-section-label" style="margin-top:14px">Manage Chrome AI Models</div>
+        <div class="modal-note">
+          Chrome AI models are managed by Chrome itself. To <b>inspect, re-download, or remove</b> Gemini Nano:<br>
+          <a href="chrome://on-device-internals/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;font-family:ui-monospace,monospace;font-size:0.78rem">chrome://on-device-internals/</a> · <a href="chrome://components/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;font-family:ui-monospace,monospace;font-size:0.78rem">chrome://components/</a><br>
+          <span style="opacity:.7">(Paste these URLs into Chrome's address bar — links can't open them directly.)</span>
+        </div>
+        <div class="modal-note" style="margin-top:10px">Requires Chrome 127+ with <code>chrome://flags/#prompt-api-for-gemini-nano</code> set to <b>Enabled</b>, then restart Chrome.</div>
       </div>
     </div>
 
