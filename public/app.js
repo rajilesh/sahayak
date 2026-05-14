@@ -525,7 +525,7 @@ async function loadModels() {
   let useDirectBridge = IS_REMOTE; // On Render, always try direct bridge first
 
   // Helper that renders the installed-models list from a raw array
-  const renderInstalled = (models, current) => {
+  const renderInstalled = (models, current, provider = "ollama") => {
     if (!models.length) {
       installedList.innerHTML = '<div class="installed-empty">No models installed — pull one below ↓</div>';
       return;
@@ -540,13 +540,13 @@ async function loadModels() {
           ${isActive ? '<span class="installed-tag">active</span>' : ""}
         </div>
         <div class="installed-actions">
-          ${!isActive ? `<button class="switch-inline-btn" data-model="${escapeHtml(m.name)}">Use</button>` : ""}
+          ${!isActive ? `<button class="switch-inline-btn" data-model="${escapeHtml(m.name)}" data-prov="${provider}">Use</button>` : ""}
           <button class="del-btn" data-model="${escapeHtml(m.name)}" title="Delete model">🗑</button>
         </div>
       </div>`;
     }).join("");
     installedList.querySelectorAll(".switch-inline-btn").forEach((b) =>
-      b.addEventListener("click", () => switchModel(b.dataset.model)));
+      b.addEventListener("click", () => switchModel(b.dataset.model, b.dataset.prov || "ollama")));
     installedList.querySelectorAll(".del-btn").forEach((b) =>
       b.addEventListener("click", () => deleteModel(b.dataset.model, b)));
   };
@@ -626,28 +626,32 @@ async function loadModels() {
 function updateActiveBadge(name) {
   const badge = $("#active-model-badge");
   const topbarLabel = $("#topbar-model-label");
+  const sub = document.querySelector(".sub");
   if (badge) badge.textContent = name;
   if (topbarLabel) topbarLabel.textContent = name;
+  if (sub) sub.textContent = `Offline IMCI triage · ${name}`;
 }
 
-async function switchModel(model) {
+async function switchModel(model, provider = "ollama") {
   if (IS_REMOTE) {
     // Direct mode: just remember the chosen model client-side
     localStorage.setItem("sahayak_active_model", model);
+    localStorage.setItem("sahayak_active_provider", provider);
     updateActiveBadge(model);
     loadModels();
     return;
   }
   try {
-    const data = await safeJsonFetch("/api/set-model", {
+    const data = await safeJsonFetch("/api/set-provider", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({ provider, model }),
     });
     if (data.ok) { updateActiveBadge(data.model); loadModels(); }
     else alert(`Switch failed: ${data.error}`);
   } catch (e) {
     // Fallback to direct-bridge bookkeeping
     localStorage.setItem("sahayak_active_model", model);
+    localStorage.setItem("sahayak_active_provider", provider);
     updateActiveBadge(model);
     loadModels();
   }
