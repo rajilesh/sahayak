@@ -1,7 +1,7 @@
 const I18N = {
-  en: { intake: "Patient intake", name: "Name", age: "Age (months)", weight: "Weight (kg)", sex: "Sex", temp: "Temp °C", rr: "Resp rate", spo2: "SpO₂ %", symptoms: "Symptoms (free text, any language)", result: "Assessment" },
-  hi: { intake: "मरीज़ का विवरण", name: "नाम", age: "आयु (माह)", weight: "वज़न (किग्रा)", sex: "लिंग", temp: "तापमान °C", rr: "श्वसन दर", spo2: "SpO₂ %", symptoms: "लक्षण (किसी भी भाषा में लिखें)", result: "निर्धारण" },
-  sw: { intake: "Taarifa ya mgonjwa", name: "Jina", age: "Umri (miezi)", weight: "Uzito (kg)", sex: "Jinsia", temp: "Joto °C", rr: "Mzunguko wa kupumua", spo2: "SpO₂ %", symptoms: "Dalili (lugha yoyote)", result: "Tathmini" },
+  en: { intake: "Patient intake", name: "Name", age: "Age", weight: "Weight (kg)", sex: "Sex", temp: "Temp °C", rr: "Resp rate", spo2: "SpO₂ %", symptoms: "Symptoms (free text, any language)", result: "Assessment" },
+  hi: { intake: "मरीज़ का विवरण", name: "नाम", age: "आयु", weight: "वज़न (किग्रा)", sex: "लिंग", temp: "तापमान °C", rr: "श्वसन दर", spo2: "SpO₂ %", symptoms: "लक्षण (किसी भी भाषा में लिखें)", result: "निर्धारण" },
+  sw: { intake: "Taarifa ya mgonjwa", name: "Jina", age: "Umri", weight: "Uzito (kg)", sex: "Jinsia", temp: "Joto °C", rr: "Mzunguko wa kupumua", spo2: "SpO₂ %", symptoms: "Dalili (lugha yoyote)", result: "Tathmini" },
 };
 
 const $ = (s) => document.querySelector(s);
@@ -112,9 +112,19 @@ $("#clear").addEventListener("click", () => {
   showEmpty();
 });
 
+function ageDisplay(months) {
+  if (!months && months !== 0) return "—";
+  if (months < 24) return `${months} months`;
+  const years = months / 12;
+  return Number.isInteger(years) ? `${years} years` : `${years.toFixed(1)} years`;
+}
+
 function patientPayload() {
+  const rawAge = +$("#p-age").value || 0;
+  const unit = ($("#p-age-unit")?.value) || "months";
+  const age_months = unit === "years" ? Math.round(rawAge * 12) : rawAge;
   return {
-    name: $("#p-name").value, age_months: +$("#p-age").value,
+    name: $("#p-name").value, age_months,
     weight_kg: +$("#p-weight").value, sex: $("#p-sex").value,
     vitals: { temp_c: +$("#p-temp").value, respiratory_rate: +$("#p-rr").value, spo2: +$("#p-spo2").value },
     symptoms: $("#p-symptoms").value, lang: $("#lang").value,
@@ -219,8 +229,8 @@ function renderReport(data, patient) {
   // Header
   $("#r-badge-text").textContent = meta.badge;
   const subject = patient.name
-    ? `${patient.name}, ${patient.age_months} months`
-    : `Child, ${patient.age_months} months`;
+    ? `${patient.name}, ${ageDisplay(patient.age_months)}`
+    : `Child, ${ageDisplay(patient.age_months)}`;
   $("#r-subject").textContent = subject;
 
   // ---- STEP 1: Vitals ----
@@ -278,7 +288,7 @@ function renderReport(data, patient) {
   // ---- STEP 3: Patient grid ----
   $("#r-patient").innerHTML = [
     ["Patient Name", patient.name || "—"],
-    ["Age", patient.age_months + " months"],
+    ["Age", ageDisplay(patient.age_months)],
     ["Sex", patient.sex === "F" ? "Female" : patient.sex === "M" ? "Male" : "—"],
     ["Weight", patient.weight_kg + " kg"],
   ].map(([k, val]) => `<div class="info-item"><div class="info-key">${k}</div><div class="info-val">${escapeHtml(val)}</div></div>`).join("");
@@ -355,7 +365,7 @@ $("#run").addEventListener("click", async () => {
   const stepper = setInterval(() => { step = Math.min(3, step + 1); showThinking(step); }, 4000);
 
   const p = patientPayload();
-  const user = `Patient ${p.name || "[anon]"}, ${p.age_months} months, ${p.weight_kg} kg, ${p.sex}.
+  const user = `Patient ${p.name || "[anon]"}, ${ageDisplay(p.age_months)} (${p.age_months} months), ${p.weight_kg} kg, ${p.sex}.
 Vitals: temp ${p.vitals.temp_c}°C, RR ${p.vitals.respiratory_rate}, SpO2 ${p.vitals.spo2}%.
 Symptoms (worker wrote in their language): "${p.symptoms}"
 Caregiver language: ${p.lang}.
@@ -375,7 +385,12 @@ Format the plan as concise markdown with short bullets. Do NOT use LaTeX math. U
         body: JSON.stringify({ messages: [{ role: "user", content: user }] }),
       });
       data = await r.json();
+      // If server can't reach Ollama (e.g. ECONNREFUSED or no model), fall back to direct bridge
+      if (data && data.error && currentProviderKey === "ollama" && (localStorage.getItem("sahayak_active_model") || /Cannot reach|fetch failed|ECONNREFUSED/i.test(data.error))) {
+        try { data = await triageDirectOllama(user, p); } catch (_) { /* keep original error */ }
+      }
     }
+    if (data && data.error && !data.trace?.length) throw new Error(data.error);
     renderReport(data, p);
   } catch (e) {
     $("#empty-state").hidden = false;

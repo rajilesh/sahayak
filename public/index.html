@@ -40,7 +40,15 @@
     <h2 data-i18n="intake">Patient intake</h2>
     <div class="row">
       <label data-i18n="name">Name<input id="p-name" placeholder="—" /></label>
-      <label data-i18n="age">Age (months)<input id="p-age" type="number" value="24" /></label>
+      <label data-i18n="age">Age
+        <div class="age-row">
+          <input id="p-age" type="number" value="24" min="0" />
+          <select id="p-age-unit">
+            <option value="months" selected>months</option>
+            <option value="years">years</option>
+          </select>
+        </div>
+      </label>
       <label data-i18n="weight">Weight (kg)<input id="p-weight" type="number" value="11" /></label>
       <label data-i18n="sex">Sex
         <select id="p-sex"><option>F</option><option>M</option></select>

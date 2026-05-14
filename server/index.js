@@ -14,9 +14,9 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 /* ── Multi-provider config ── */
 const PROVIDERS = {
-  ollama:   { id: "ollama",   name: "Ollama",    type: "ollama", baseUrl: process.env.OLLAMA_URL    || "http://localhost:11434" },
-  lmstudio: { id: "lmstudio", name: "LM Studio", type: "openai", baseUrl: process.env.LMSTUDIO_URL  || "http://localhost:1234"  },
-  jan:      { id: "jan",      name: "Jan.ai",     type: "openai", baseUrl: process.env.JAN_URL       || "http://localhost:1337"  },
+  ollama:   { id: "ollama",   name: "Ollama",    type: "ollama", baseUrl: process.env.OLLAMA_URL    || "http://127.0.0.1:11434" },
+  lmstudio: { id: "lmstudio", name: "LM Studio", type: "openai", baseUrl: process.env.LMSTUDIO_URL  || "http://127.0.0.1:1234"  },
+  jan:      { id: "jan",      name: "Jan.ai",     type: "openai", baseUrl: process.env.JAN_URL       || "http://127.0.0.1:1337"  },
   custom:   { id: "custom",   name: "Custom",     type: "openai", baseUrl: process.env.CUSTOM_URL    || ""                      },
 };
 
@@ -40,19 +40,33 @@ Never invent danger signs or doses. If unsure, recommend referral.`;
 const TOOL_SPECS = tools.specs;
 
 async function chatOnceOllama(messages, baseUrl) {
-  const res = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: currentModel,
-      messages,
-      tools: TOOL_SPECS,
-      stream: false,
-      options: { temperature: 0.2 },
-    }),
-  });
-  if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
-  return res.json();
+  const tryUrl = async (url) => {
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: currentModel,
+        messages,
+        tools: TOOL_SPECS,
+        stream: false,
+        options: { temperature: 0.2 },
+      }),
+    });
+    if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
+    return res.json();
+  };
+  try {
+    return await tryUrl(baseUrl);
+  } catch (e) {
+    // Node fetch resolves "localhost" via IPv6 first; Ollama often binds IPv4 only.
+    // Retry with 127.0.0.1 if applicable.
+    if (/localhost/.test(baseUrl) && (e.cause?.code === "ECONNREFUSED" || /ECONNREFUSED|fetch failed/i.test(e.message))) {
+      const ipv4 = baseUrl.replace("localhost", "127.0.0.1");
+      console.warn(`[sahayak] ${baseUrl} refused — retrying via ${ipv4}`);
+      return tryUrl(ipv4);
+    }
+    throw e;
+  }
 }
 
 async function chatOnceOpenAI(messages, baseUrl) {
@@ -138,7 +152,11 @@ app.post("/api/triage", async (req, res) => {
     res.json({ reply: "[max tool steps reached]", trace });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: e.message, trace });
+    const isConn = e.cause?.code === "ECONNREFUSED" || /ECONNREFUSED|fetch failed/i.test(e.message);
+    const hint = isConn
+      ? `Cannot reach ${currentProviderKey} at ${PROVIDERS[currentProviderKey]?.baseUrl}. Start it (e.g. \`ollama serve\`) and ensure the model "${currentModel}" is pulled (\`ollama pull ${currentModel}\`).`
+      : e.message;
+    res.status(500).json({ error: hint, trace });
   }
 });
 
