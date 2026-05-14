@@ -1,0 +1,368 @@
+/* ============================================================
+   Sahayak — Triage report  (RED urgent / YELLOW caution / GREEN calm)
+   Level is set via .report-shell.level-RED|YELLOW|GREEN
+   ============================================================ */
+
+/* ---------- TOKENS ---------- */
+:root {
+  --r-red:         #E63946;
+  --r-red-light:   #FF8A94;
+  --r-red-bg:      #FFF0F1;
+  --r-amber:       #F59E0B;
+  --r-amber-deep:  #B45309;
+  --r-amber-bg:    #FFFBEB;
+  --r-green:       #059669;
+  --r-green-light: #6EE7B7;
+  --r-green-bg:    #ECFDF5;
+  --r-ink:         #1A1A2E;
+  --r-muted:       #6B7280;
+  --r-surface:     #F9FAFB;
+  --r-border:      #E5E7EB;
+}
+
+/* ---------- SHELL ---------- */
+.report-shell {
+  font-family: 'Nunito', sans-serif;
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 0;
+  margin-top: -6px;
+}
+/* Per-level page backgrounds */
+.report-shell.level-RED    { background: linear-gradient(180deg, #FFF0F1 0%, #ffffff 100%); }
+.report-shell.level-YELLOW { background: linear-gradient(180deg, #FFFBEB 0%, #ffffff 100%); }
+.report-shell.level-GREEN  { background: linear-gradient(180deg, #ECFDF5 0%, #ffffff 100%); }
+
+/* ---------- BACKGROUND BLOBS ---------- */
+.report-shell .bg-blobs {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+}
+.report-shell .blob {
+  position: absolute; border-radius: 50%; filter: blur(70px);
+}
+/* RED: fast animated, vivid */
+.report-shell.level-RED .blob { opacity: 0.18; animation: r-drift 10s ease-in-out infinite alternate; }
+/* YELLOW: slow, gentle */
+.report-shell.level-YELLOW .blob { opacity: 0.12; animation: r-drift 18s ease-in-out infinite alternate; }
+/* GREEN: nearly static, very faint */
+.report-shell.level-GREEN .blob  { opacity: 0.08; animation: none; }
+
+@keyframes r-drift {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(24px, 32px) scale(1.08); }
+}
+
+.report-shell.level-RED    .blob-1 { width:360px;height:360px;background:var(--r-red);    top:-100px;left:-60px; }
+.report-shell.level-RED    .blob-2 { width:280px;height:280px;background:#6C63FF;         bottom:0;right:-80px;animation-delay:-5s; }
+.report-shell.level-RED    .blob-3 { width:200px;height:200px;background:var(--r-amber);  bottom:200px;left:35%;animation-delay:-9s; }
+
+.report-shell.level-YELLOW .blob-1 { width:340px;height:340px;background:var(--r-amber);  top:-80px;left:-50px; }
+.report-shell.level-YELLOW .blob-2 { width:240px;height:240px;background:#FDE68A;         bottom:0;right:-60px;animation-delay:-7s; }
+.report-shell.level-YELLOW .blob-3 { width:180px;height:180px;background:#D97706;         bottom:200px;left:40%;animation-delay:-11s; }
+
+.report-shell.level-GREEN  .blob-1 { width:320px;height:320px;background:var(--r-green);  top:-100px;left:-40px; }
+.report-shell.level-GREEN  .blob-2 { width:220px;height:220px;background:#6EE7B7;         bottom:0;right:-60px; }
+.report-shell.level-GREEN  .blob-3 { width:160px;height:160px;background:#A7F3D0;         bottom:180px;left:38%; }
+
+/* ---------- PAGE WRAPPER ---------- */
+.report-shell .report-page {
+  position: relative; z-index: 2;
+  padding: 28px 22px 32px;
+}
+
+/* ---------- HEADER ---------- */
+.r-header { text-align: center; margin-bottom: 26px; animation: r-slideDown .7s cubic-bezier(.16,1,.3,1) both; }
+
+/* Badge */
+.r-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: 'DM Mono', monospace; font-size: 10.5px; letter-spacing: 2px;
+  padding: 6px 14px; border-radius: 100px; margin-bottom: 14px; color: white;
+}
+.report-shell.level-RED    .r-badge {
+  background: var(--r-red);
+  box-shadow: 0 4px 20px rgba(230,57,70,.45);
+  animation: r-pulse-glow-red 2s ease-in-out infinite;
+}
+.report-shell.level-YELLOW .r-badge {
+  background: var(--r-amber-deep);
+  box-shadow: 0 4px 16px rgba(180,83,9,.35);
+  animation: none; /* no pulse — just present */
+}
+.report-shell.level-GREEN  .r-badge {
+  background: var(--r-green);
+  box-shadow: 0 4px 12px rgba(5,150,105,.25);
+  animation: none; /* calm — no blinking */
+}
+
+@keyframes r-pulse-glow-red {
+  0%,100% { box-shadow: 0 4px 20px rgba(230,57,70,.45); }
+  50%      { box-shadow: 0 4px 36px rgba(230,57,70,.8); }
+}
+
+/* Badge dot — blinks only for RED */
+.report-shell .badge-dot { width: 8px; height: 8px; background: white; border-radius: 50%; }
+.report-shell.level-RED    .badge-dot { animation: r-blink 1.0s ease-in-out infinite; }
+.report-shell.level-YELLOW .badge-dot { animation: r-blink 2.4s ease-in-out infinite; }
+.report-shell.level-GREEN  .badge-dot { animation: none; opacity: 0.85; }
+@keyframes r-blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+.report-shell h1 {
+  font-family: 'DM Serif Display', serif; font-size: clamp(26px, 4.4vw, 40px);
+  color: var(--r-ink); line-height: 1.1; margin-bottom: 6px; font-weight: 400;
+}
+.report-shell h1 em { font-style: italic; }
+.r-subtitle { color: var(--r-muted); font-size: 13px; }
+
+/* ---------- STEP FLOW ---------- */
+.step-flow { display: flex; flex-direction: column; gap: 18px; }
+
+.r-card {
+  background: white; border-radius: 18px;
+  box-shadow: 0 2px 18px rgba(0,0,0,.07);
+  overflow: hidden;
+  opacity: 0; transform: translateY(24px);
+  transition: opacity .55s ease, transform .55s ease;
+}
+.r-card.visible { opacity: 1; transform: translateY(0); }
+
+.r-card-header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; border-bottom: 1px solid var(--r-border);
+}
+.step-num {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500;
+  flex-shrink: 0;
+}
+.step-1 .step-num { background: #EEF2FF; color: #4F46E5; }
+/* Step-2 num: level-aware */
+.report-shell.level-RED    .step-2 .step-num { background: var(--r-red-bg);   color: var(--r-red); }
+.report-shell.level-YELLOW .step-2 .step-num { background: var(--r-amber-bg); color: var(--r-amber-deep); }
+.report-shell.level-GREEN  .step-2 .step-num { background: var(--r-green-bg); color: var(--r-green); }
+.step-3 .step-num { background: var(--r-surface); color: var(--r-ink); }
+
+.r-card-title    { font-size: 15px; font-weight: 800; color: var(--r-ink); }
+.r-card-subtitle { font-size: 11.5px; color: var(--r-muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
+.r-card-body     { padding: 20px; }
+
+/* ---------- VITALS ---------- */
+.vitals-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+.vital-card {
+  background: var(--r-surface); border-radius: 14px; padding: 14px 10px;
+  text-align: center; position: relative; overflow: hidden;
+  border: 2px solid transparent;
+}
+/* Danger card: shake only on RED level */
+.report-shell.level-RED    .vital-card.danger { animation: r-shake-in .5s ease both; }
+.report-shell.level-YELLOW .vital-card.danger { animation: r-fade-in .4s ease both; }
+.report-shell.level-GREEN  .vital-card         { animation: r-fade-in .4s ease both; }
+
+.vital-card.warn   { background: var(--r-amber-bg); border-color: #FCD34D; }
+.vital-card.danger { background: var(--r-red-bg);   border-color: var(--r-red-light); }
+.vital-card.ok     { background: var(--r-green-bg); border-color: var(--r-green-light); }
+
+@keyframes r-shake-in {
+  0%   { transform: scale(.92) rotate(-1deg); opacity: 0; }
+  60%  { transform: scale(1.04) rotate(.5deg); }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes r-fade-in {
+  from { opacity: 0; transform: scale(.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.vital-icon  { font-size: 22px; margin-bottom: 4px; line-height: 1; }
+.vital-value {
+  font-family: 'DM Mono', monospace; font-size: 19px; font-weight: 500;
+  color: var(--r-ink); display: block; line-height: 1.1;
+}
+.vital-card.danger .vital-value { color: var(--r-red); }
+.vital-card.warn   .vital-value { color: var(--r-amber-deep); }
+.vital-card.ok     .vital-value { color: var(--r-green); }
+.vital-label {
+  font-size: 10.5px; color: var(--r-muted); margin-top: 4px;
+  letter-spacing: .5px; text-transform: uppercase; font-weight: 700;
+}
+.danger-tag {
+  display: inline-block; color: white;
+  font-size: 9px; letter-spacing: 1px; padding: 2px 7px; border-radius: 100px;
+  margin-top: 6px; text-transform: uppercase; font-weight: 700;
+}
+.vital-card.danger .danger-tag { background: var(--r-red); }
+.vital-card.warn   .danger-tag { background: var(--r-amber-deep); }
+.vital-card.ok     .danger-tag { background: var(--r-green); }
+
+/* ---------- SYMPTOMS ---------- */
+.symptoms { display: flex; flex-direction: column; gap: 8px; }
+.symptom {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--r-surface); border-radius: 12px; padding: 10px 14px;
+  font-size: 13.5px; color: var(--r-ink); font-weight: 600;
+  border-left: 4px solid var(--r-border);
+  animation: r-fadeRight .5s ease both;
+}
+.symptom.danger-s { border-left-color: var(--r-red);   background: var(--r-red-bg); }
+.symptom.warn-s   { border-left-color: var(--r-amber); background: var(--r-amber-bg); }
+/* On GREEN, no danger coloring even if heuristic fires */
+.report-shell.level-GREEN .symptom.danger-s,
+.report-shell.level-GREEN .symptom.warn-s {
+  border-left-color: var(--r-green); background: var(--r-green-bg);
+}
+@keyframes r-fadeRight { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+
+/* ---------- CLASSIFICATION BANNER ---------- */
+.classification-banner {
+  display: flex; flex-direction: column; align-items: center;
+  border-radius: 16px; padding: 28px 20px; text-align: center; color: white;
+  position: relative; overflow: hidden;
+}
+/* Per-level banner gradients */
+.report-shell.level-RED    .classification-banner { background: linear-gradient(135deg, #E63946 0%, #C1121F 100%); }
+.report-shell.level-YELLOW .classification-banner { background: linear-gradient(135deg, #F59E0B 0%, #B45309 100%); }
+.report-shell.level-GREEN  .classification-banner { background: linear-gradient(135deg, #059669 0%, #064E3B 100%); }
+
+.classification-banner::before {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(45deg, rgba(255,255,255,.04) 0, rgba(255,255,255,.04) 1px, transparent 1px, transparent 24px);
+}
+.r-level-label {
+  font-family: 'DM Mono', monospace; font-size: 64px; font-weight: 500;
+  line-height: 1; letter-spacing: -2px;
+  text-shadow: 0 4px 40px rgba(0,0,0,.3);
+  animation: r-popIn .6s cubic-bezier(.34,1.56,.64,1) .3s both;
+  position: relative; z-index: 1;
+}
+@keyframes r-popIn { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.r-level-meaning {
+  font-size: 13px; opacity: .9; margin-top: 8px;
+  font-weight: 700; letter-spacing: 3px; position: relative; z-index: 1;
+}
+
+/* Alert rings: RED only */
+.alert-rings {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.ring {
+  position: absolute; border-radius: 50%; border: 2px solid rgba(255,255,255,.14);
+}
+.ring-1 { width: 110px; height: 110px; }
+.ring-2 { width: 180px; height: 180px; }
+.ring-3 { width: 280px; height: 280px; }
+/* Only RED gets expanding alarm rings */
+.report-shell.level-RED    .ring { animation: r-expand 3s ease-out infinite; }
+.report-shell.level-RED    .ring-1 { animation-delay: 0s; }
+.report-shell.level-RED    .ring-2 { animation-delay: .8s; }
+.report-shell.level-RED    .ring-3 { animation-delay: 1.6s; }
+/* YELLOW: static rings, very faint — "caution, but not alarm" */
+.report-shell.level-YELLOW .ring { opacity: 0.15; animation: none; }
+/* GREEN: no rings visible */
+.report-shell.level-GREEN  .ring { display: none; }
+@keyframes r-expand { from { opacity: .6; transform: scale(.6); } to { opacity: 0; transform: scale(1.4); } }
+
+.danger-pills {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  justify-content: center; margin-top: 16px; position: relative; z-index: 1;
+}
+.r-pill {
+  background: rgba(255,255,255,.2); backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,.3);
+  color: white; font-size: 11.5px; padding: 4px 12px;
+  border-radius: 100px; font-weight: 600;
+}
+
+/* ---------- REFERRAL / STEP 3 ---------- */
+.patient-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.info-item    { background: var(--r-surface); border-radius: 12px; padding: 12px 14px; }
+.info-key     { font-size: 10.5px; color: var(--r-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; font-weight: 700; }
+.info-val     { font-size: 15px; font-weight: 800; color: var(--r-ink); }
+
+.r-section-label {
+  font-size: 12px; font-weight: 800; color: var(--r-muted);
+  text-transform: uppercase; letter-spacing: .5px; margin: 6px 0 10px;
+}
+.findings-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.finding {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 14px; background: var(--r-surface); border-radius: 12px;
+  font-size: 13.5px; color: var(--r-ink); line-height: 1.5;
+  animation: r-fadeRight .5s ease both;
+}
+.finding-num {
+  width: 22px; height: 22px; min-width: 22px; border-radius: 50%;
+  background: var(--r-ink); color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-family: 'DM Mono', monospace; font-weight: 500;
+}
+
+.r-card .md-body { font-size: 13.5px; line-height: 1.55; color: var(--r-ink); margin-bottom: 18px; }
+.r-card .md-body h3, .r-card .md-body h4, .r-card .md-body h5 { margin: 10px 0 6px; font-size: 14px; }
+.r-card .md-body p  { margin: 6px 0; }
+.r-card .md-body ul, .r-card .md-body ol { margin: 6px 0 6px 22px; }
+.r-card .md-body strong { color: var(--r-ink); }
+
+/* Action box: RED = dark/alarming, YELLOW = amber warm, GREEN = calm forest */
+.action-box {
+  border-radius: 16px; padding: 18px 20px;
+  display: flex; align-items: center; gap: 16px; margin-top: 4px; color: white;
+}
+.report-shell.level-RED    .action-box { background: linear-gradient(135deg, #1A1A2E, #7F1D1D); }
+.report-shell.level-YELLOW .action-box { background: linear-gradient(135deg, #78350F, #92400E); }
+.report-shell.level-GREEN  .action-box { background: linear-gradient(135deg, #064E3B, #065F46); }
+
+/* Action icon: only RED bounces urgently */
+.action-icon { font-size: 30px; flex-shrink: 0; }
+.report-shell.level-RED    .action-icon { animation: r-bounce 1.2s ease-in-out infinite; }
+.report-shell.level-YELLOW .action-icon { animation: r-bounce 2.5s ease-in-out infinite; }
+.report-shell.level-GREEN  .action-icon { animation: none; }
+@keyframes r-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+.action-text { font-size: 13.5px; font-weight: 600; line-height: 1.5; }
+.report-shell.level-RED    .action-text strong { color: var(--r-red-light); }
+.report-shell.level-YELLOW .action-text strong { color: #FDE68A; }
+.report-shell.level-GREEN  .action-text strong { color: #A7F3D0; }
+
+/* ---------- CONNECTOR ---------- */
+.connector { display: flex; justify-content: center; align-items: center; height: 18px; }
+.connector-line { width: 2px; height: 100%; background: linear-gradient(to bottom, transparent, var(--r-border), transparent); }
+
+/* ---------- TRACE ---------- */
+.r-card .trace { margin-top: 10px; }
+.r-card .trace summary { cursor: pointer; font-size: 12px; color: var(--r-muted); padding: 6px 0; font-family: 'DM Mono', monospace; }
+.r-card .trace pre {
+  background: #0f1815; color: #c8e6d6; padding: 12px; border-radius: 10px;
+  overflow: auto; font-size: 11px; max-height: 240px; margin-top: 6px;
+}
+
+/* ---------- FOOTER ---------- */
+.r-footer {
+  text-align: center; margin-top: 24px; color: var(--r-muted); font-size: 11px;
+  font-family: 'DM Mono', monospace; letter-spacing: 1px;
+}
+
+/* ---------- ANIMATIONS ---------- */
+@keyframes r-slideDown { from { opacity: 0; transform: translateY(-22px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ---------- REPORT-MODE (outer card dissolves) ---------- */
+.card.output.report-mode {
+  background: transparent; border: 0; box-shadow: none; padding: 0;
+}
+.card.output.report-mode > h2 { display: none; }
+@media (min-width: 901px) {
+  .grid:has(.card.output.report-mode) { grid-template-columns: 1fr; max-width: 880px; }
+}
+.card.output.report-mode .report-shell {
+  box-shadow: 0 4px 28px rgba(15,23,42,.09);
+  border: 1px solid rgba(0,0,0,.06);
+}
+.report-mode .r-card { will-change: opacity, transform; }
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 520px) {
+  .vitals-grid  { grid-template-columns: 1fr 1fr; }
+  .patient-grid { grid-template-columns: 1fr; }
+  .r-level-label { font-size: 48px; }
+}

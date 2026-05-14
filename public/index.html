@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sahayak — Frontline Triage (Gemma 4)</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#0b5d3b" />
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/report.css" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img src="/icons/icon.svg" width="28" height="28" alt="" />
+    <div>
+      <div class="title">Sahayak</div>
+      <div class="sub">Offline triage co-pilot · Gemma 4 E2B</div>
+    </div>
+  </div>
+  <div class="status">
+    <span id="online-dot" class="dot offline"></span>
+    <span id="online-text">offline-ready</span>
+    <select id="lang">
+      <option value="en">English</option>
+      <option value="hi">हिन्दी</option>
+      <option value="sw">Kiswahili</option>
+    </select>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="card intake">
+    <h2 data-i18n="intake">Patient intake</h2>
+    <div class="row">
+      <label data-i18n="name">Name<input id="p-name" placeholder="—" /></label>
+      <label data-i18n="age">Age (months)<input id="p-age" type="number" value="24" /></label>
+      <label data-i18n="weight">Weight (kg)<input id="p-weight" type="number" value="11" /></label>
+      <label data-i18n="sex">Sex
+        <select id="p-sex"><option>F</option><option>M</option></select>
+      </label>
+    </div>
+    <div class="row">
+      <label data-i18n="temp">Temp °C<input id="p-temp" type="number" step="0.1" value="38.7" /></label>
+      <label data-i18n="rr">Resp rate<input id="p-rr" type="number" value="52" /></label>
+      <label data-i18n="spo2">SpO₂ %<input id="p-spo2" type="number" value="93" /></label>
+    </div>
+    <label data-i18n="symptoms">Symptoms (free text, any language)
+      <textarea id="p-symptoms" rows="3">Cough for 3 days, fast breathing, refusing to feed since morning.</textarea>
+    </label>
+    <div class="actions">
+      <button id="run">▶ Run triage</button>
+      <button id="sample">Load sample</button>
+      <button id="clear">Clear</button>
+    </div>
+  </section>
+
+  <section class="card output" id="output-card">
+    <h2 data-i18n="result">Assessment</h2>
+
+    <div id="empty-state" class="empty">
+      <div class="empty-illu">
+        <svg viewBox="0 0 120 120" width="96" height="96" aria-hidden="true">
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#dde6e0" stroke-width="2" stroke-dasharray="4 6"/>
+          <path d="M60 36c-9 0-15 6-15 14 0 11 15 28 15 28s15-17 15-28c0-8-6-14-15-14z" fill="#0b5d3b"/>
+          <circle cx="60" cy="50" r="4" fill="#fff"/>
+        </svg>
+      </div>
+      <p>Load a sample case and tap <b>Run triage</b>. Gemma 4 will analyse offline and produce a clean, animated report.</p>
+    </div>
+
+    <div id="thinking" class="thinking" hidden>
+      <div class="thinking-row">
+        <span class="t-step" data-step="1">Reading symptoms</span>
+        <span class="t-step" data-step="2">Checking danger signs</span>
+        <span class="t-step" data-step="3">Classifying</span>
+        <span class="t-step" data-step="4">Composing plan</span>
+      </div>
+      <div class="thinking-bar"><span></span></div>
+    </div>
+
+    <!-- ===== REPORT (designed) ===== -->
+    <div id="report-shell" class="report-shell" hidden>
+      <div class="bg-blobs" aria-hidden="true">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+      </div>
+
+      <div class="report-page">
+        <div class="r-header">
+          <div class="r-badge"><span class="badge-dot"></span> <span id="r-badge-text">EMERGENCY TRIAGE REPORT</span></div>
+          <h1 id="r-title">Clinical Assessment<br><em id="r-subject">—</em></h1>
+          <p class="r-subtitle">WHO IMCI Protocol · Gemma 4 on-device assessment</p>
+        </div>
+
+        <div class="step-flow">
+          <!-- STEP 1 -->
+          <div class="r-card step-1" id="r-card1">
+            <div class="r-card-header">
+              <div class="step-num">01</div>
+              <div>
+                <div class="r-card-title">Danger Signs Assessment</div>
+                <div class="r-card-subtitle">assess_danger_signs · WHO IMCI Chart Booklet</div>
+              </div>
+            </div>
+            <div class="r-card-body">
+              <div class="vitals-grid" id="r-vitals"></div>
+              <div class="symptoms" id="r-symptoms"></div>
+            </div>
+          </div>
+
+          <div class="connector"><div class="connector-line"></div></div>
+
+          <!-- STEP 2 -->
+          <div class="r-card step-2" id="r-card2">
+            <div class="r-card-header">
+              <div class="step-num">02</div>
+              <div>
+                <div class="r-card-title">Triage Classification</div>
+                <div class="r-card-subtitle">triage_classify · Urgency Level</div>
+              </div>
+            </div>
+            <div class="r-card-body">
+              <div class="classification-banner" id="r-banner">
+                <div class="alert-rings">
+                  <div class="ring ring-1"></div>
+                  <div class="ring ring-2"></div>
+                  <div class="ring ring-3"></div>
+                </div>
+                <div class="r-level-label" id="r-level">—</div>
+                <div class="r-level-meaning" id="r-meaning">—</div>
+                <div class="danger-pills" id="r-pills"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="connector"><div class="connector-line"></div></div>
+
+          <!-- STEP 3 -->
+          <div class="r-card step-3" id="r-card3">
+            <div class="r-card-header">
+              <div class="step-num">03</div>
+              <div>
+                <div class="r-card-title">Referral &amp; Plan</div>
+                <div class="r-card-subtitle">generate_referral · For Receiving Facility</div>
+              </div>
+            </div>
+            <div class="r-card-body">
+              <div class="patient-grid" id="r-patient"></div>
+
+              <p class="r-section-label">Clinical Findings</p>
+              <div class="findings-list" id="r-findings"></div>
+
+              <p class="r-section-label">Caregiver Explanation</p>
+              <div class="md-body" id="r-plan"></div>
+
+              <div class="action-box" id="r-action">
+                <div class="action-icon" id="r-action-icon">🚨</div>
+                <div class="action-text" id="r-action-text">—</div>
+              </div>
+
+              <details class="trace">
+                <summary>🔍 Tool-call trace (proof of work)</summary>
+                <pre id="trace"></pre>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <div class="r-footer">
+          WHO IMCI Protocol · Gemma 4 E2B · On-device, offline
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  Runs locally with Gemma 4 via Ollama. No patient data leaves the device.
+  · <a href="https://github.com/" target="_blank">code</a>
+  · <a href="/api/health" target="_blank">/api/health</a>
+</footer>
+
+<script src="/md.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
