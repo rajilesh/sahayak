@@ -23,6 +23,10 @@
   <div class="status">
     <span id="online-dot" class="dot offline"></span>
     <span id="online-text">offline-ready</span>
+    <button id="model-btn" class="model-btn" title="Model settings">
+      <span id="topbar-model-label">gemma4:e2b</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
     <select id="lang">
       <option value="en">English</option>
       <option value="hi">हिन्दी</option>
@@ -183,6 +187,144 @@
   · <a href="https://github.com/" target="_blank">code</a>
   · <a href="/api/health" target="_blank">/api/health</a>
 </footer>
+
+<!-- Model Settings Modal -->
+<div id="model-modal" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">⚙ AI Provider &amp; Model</div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+
+    <!-- Active model -->
+    <div class="modal-section">
+      <div class="modal-section-label">Active</div>
+      <div class="active-model-row">
+        <span class="model-badge" id="active-model-badge">—</span>
+        <span class="model-hint" id="model-ollama-hint">Running on-device</span>
+      </div>
+    </div>
+
+    <!-- API Server URL — only shown on localhost with non-3000 port -->
+    <div class="modal-section api-server-section" id="api-server-section" hidden>
+      <div class="modal-section-label">Sahayak Server URL</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="api-base-input" type="url" placeholder="http://localhost:3000"
+          style="flex:1;padding:8px 12px;border:1.5px solid var(--line);border-radius:10px;font-size:0.82rem;outline:none;font-family:ui-monospace,monospace">
+        <button class="ghost-sm" id="api-base-save-btn">Save</button>
+      </div>
+      <div id="api-base-status" class="prov-status" style="margin-top:6px"></div>
+    </div>
+
+    <!-- Provider tabs -->
+    <div class="modal-section prov-tab-section">
+      <div class="prov-tabs" id="prov-tabs">
+        <button class="prov-tab active" data-prov="ollama">🦙 Ollama</button>
+        <button class="prov-tab" data-prov="lmstudio">LM Studio</button>
+        <button class="prov-tab" data-prov="jan">Jan.ai</button>
+        <button class="prov-tab" data-prov="chrome-ai">Chrome AI</button>
+        <button class="prov-tab" data-prov="custom">Custom</button>
+      </div>
+    </div>
+
+    <!-- ── OLLAMA PANEL ── -->
+    <div class="prov-panel" id="panel-ollama">
+      <div class="modal-section">
+        <div class="modal-section-label" style="display:flex;align-items:center;justify-content:space-between">
+          Installed Models
+          <button class="ghost-sm" id="refresh-models-btn">↻ Refresh</button>
+        </div>
+        <div id="installed-models-list" class="installed-list">
+          <div class="installed-empty">Loading…</div>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-label">Download via Ollama</div>
+        <div id="download-cards" class="download-cards"></div>
+        <div id="dl-progress-wrap" class="dl-progress-wrap" hidden>
+          <div class="dl-progress-header">
+            <span id="dl-progress-label">Downloading…</span>
+            <span id="dl-progress-size" class="dl-progress-size"></span>
+          </div>
+          <div class="dl-progress-track">
+            <div class="dl-progress-fill" id="dl-progress-fill"></div>
+          </div>
+          <div id="dl-progress-status" class="dl-progress-status"></div>
+        </div>
+        <p class="modal-note">Models are pulled directly from Ollama's registry. Requires internet for the initial download. Once downloaded, Sahayak works fully offline.</p>
+      </div>
+    </div>
+
+    <!-- ── LM STUDIO PANEL ── -->
+    <div class="prov-panel" id="panel-lmstudio" hidden>
+      <div class="modal-section">
+        <div class="prov-info-box">
+          <div class="prov-info-icon">🤖</div>
+          <div>
+            <div class="prov-info-title">LM Studio</div>
+            <div class="prov-info-desc">Runs on port 1234. Open LM Studio → Local Server → Start Server, then click Connect.</div>
+          </div>
+        </div>
+        <div id="lmstudio-status" class="prov-status"></div>
+        <div id="lmstudio-models" class="installed-list" hidden></div>
+        <button class="ghost-sm prov-connect-btn" id="lmstudio-connect-btn" style="margin-top:10px">↻ Connect to LM Studio</button>
+      </div>
+    </div>
+
+    <!-- ── JAN.AI PANEL ── -->
+    <div class="prov-panel" id="panel-jan" hidden>
+      <div class="modal-section">
+        <div class="prov-info-box">
+          <div class="prov-info-icon">☽</div>
+          <div>
+            <div class="prov-info-title">Jan.ai</div>
+            <div class="prov-info-desc">Runs on port 1337. Open Jan, load a model in the chat, then click Connect.</div>
+          </div>
+        </div>
+        <div id="jan-status" class="prov-status"></div>
+        <div id="jan-models" class="installed-list" hidden></div>
+        <button class="ghost-sm prov-connect-btn" id="jan-connect-btn" style="margin-top:10px">↻ Connect to Jan.ai</button>
+      </div>
+    </div>
+
+    <!-- ── CHROME AI PANEL ── -->
+    <div class="prov-panel" id="panel-chrome-ai" hidden>
+      <div class="modal-section">
+        <div class="prov-info-box">
+          <div class="prov-info-icon">🌐</div>
+          <div>
+            <div class="prov-info-title">Chrome Built-in AI (Gemini Nano)</div>
+            <div class="prov-info-desc">Runs Gemini Nano entirely inside Chrome. No Ollama needed — zero data leaves the browser.</div>
+          </div>
+        </div>
+        <div id="chrome-ai-status" class="prov-status"></div>
+        <div id="chrome-ai-actions"></div>
+        <div class="modal-note" style="margin-top:10px">Requires Chrome 127+ with <code>chrome://flags/#prompt-api-for-gemini-nano</code> enabled.</div>
+      </div>
+    </div>
+
+    <!-- ── CUSTOM URL PANEL ── -->
+    <div class="prov-panel" id="panel-custom" hidden>
+      <div class="modal-section">
+        <div class="prov-info-box">
+          <div class="prov-info-icon">⚙</div>
+          <div>
+            <div class="prov-info-title">Custom OpenAI-Compatible</div>
+            <div class="prov-info-desc">Any server speaking the OpenAI /v1/chat/completions API — llama.cpp, llamafile, vLLM, etc.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <input id="custom-url-input" type="url" placeholder="http://localhost:8080"
+            style="flex:1;padding:9px 12px;border:1.5px solid var(--line);border-radius:10px;font-size:0.85rem;outline:none">
+          <button class="ghost-sm prov-connect-btn" id="custom-connect-btn">Connect</button>
+        </div>
+        <div id="custom-status" class="prov-status"></div>
+        <div id="custom-models" class="installed-list" hidden></div>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <script src="/md.js"></script>
 <script src="/app.js"></script>
