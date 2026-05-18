@@ -7,32 +7,26 @@ const I18N = {
 const $ = (s) => document.querySelector(s);
 const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-let currentProviderKey = "ollama";
-
-// Configurable API base URL — persisted in localStorage
-let API_BASE = localStorage.getItem("sahayak_api_base") || "";
-// Only auto-suggest localhost:3000 when actually running on localhost on a different port
-// On remote hosts (Render, etc.), use relative URLs (empty string = same origin)
-if (!API_BASE && window.location.hostname === "localhost" && window.location.port !== "3000") {
-  API_BASE = "http://localhost:3000";
-  localStorage.setItem("sahayak_api_base", API_BASE);
-}
-// If a stale localhost entry is stored but we're on a remote host, clear it
-if (API_BASE.startsWith("http://localhost") && window.location.hostname !== "localhost") {
-  API_BASE = "";
-  localStorage.removeItem("sahayak_api_base");
-}
+// Current active provider: "ollama" | "lmstudio" | "" (none found)
+let currentProviderKey = "";
 
 // ── BROWSER-DIRECT LOCAL BRIDGE ──────────────────────────────────────────
-// On Render (or any remote host), the server can NOT reach the user's
-// localhost. So the browser talks DIRECTLY to local Ollama / LM Studio.
+// The browser always talks DIRECTLY to local Ollama / LM Studio.
 // Browsers treat http://localhost as a secure context exception, so this
 // works from https:// pages — provided the local service sends CORS headers.
-const IS_REMOTE = window.location.hostname !== "localhost" &&
-                  window.location.hostname !== "127.0.0.1";
 let LOCAL_OLLAMA   = localStorage.getItem("sahayak_local_ollama")   || "http://localhost:11434";
 let LOCAL_LMSTUDIO = localStorage.getItem("sahayak_local_lmstudio") || "http://localhost:1234";
-let LOCAL_JAN      = localStorage.getItem("sahayak_local_jan")      || "http://localhost:1337";
+
+// Returns true if a model name is a Gemma 4 variant
+const isGemma4Model = (name) => /gemma[-_]?4/i.test(name || "");
+
+// Update the topbar status chip. status ∈ "detecting" | "ok" | "err"
+function updateActiveBadge(name, status = "detecting") {
+  const label = $("#topbar-model-label");
+  const dot   = $("#model-status-dot");
+  if (label) label.textContent = name || "detecting…";
+  if (dot)   dot.className = "model-status-dot " + status;
+}
 
 async function bridgeOllamaFetch(path, opts = {}) {
   const url = LOCAL_OLLAMA.replace(/\/$/, "") + path;
@@ -64,20 +58,86 @@ async function bridgeOllamaChat(messages, model) {
   return r.json();
 }
 
-// Show API server URL field only when on localhost with a non-3000 port (dev mismatch scenario)
-document.addEventListener("DOMContentLoaded", () => {
-  const apiSec = document.getElementById("api-server-section");
-  if (apiSec) {
-    const needsField = window.location.hostname === "localhost" &&
-      window.location.port !== "" && window.location.port !== "3000";
-    apiSec.hidden = !needsField;
-  }
-  // Pre-fill bridge inputs + show CORS notice on remote hosts
-  const ollamaInput = document.getElementById("ollama-url-input");
-  if (ollamaInput) ollamaInput.value = LOCAL_OLLAMA;
-  const corsNotice = document.getElementById("ollama-cors-notice");
-  if (corsNotice && IS_REMOTE) corsNotice.hidden = false;
-});
+// ── LM Studio direct bridge ───────────────────────────────────────────────
+async function bridgeLMStudioModels() {
+  const url = LOCAL_LMSTUDIO.replace(/\/$/, "") + "/v1/models";
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`LM Studio HTTP ${r.status}`);
+  const data = await r.json();
+  return data.data || [];
+}
+
+// ── Provider initialisation (runs on page load) ───────────────────────────
+// Probes Ollama then LM Studio for a loaded Gemma 4 model.
+// Populates the topbar label and sets currentProviderKey.
+async function initializeProvider() {
+  updateActiveBadge("detecting\u2026", "detecting");
+
+  // 1. Try Ollama
+  try {
+    const data = await bridgeOllamaTags();
+    const gemma4Models = (data.models || []).filter((m) => isGemma4Model(m.name));
+    if (gemma4Models.length > 0) {
+      // Prefer e4b > e2b > first found
+      const preferred = ["gemma4:e4b", "gemma4:e2b", "gemma4:12b", "gemma4:27b"];
+      const bestName = preferred.find((p) => gemma4Models.some((m) => m.name === p))
+        || gemma4Models[0].name;
+      currentProviderKey = "ollama";
+      localStorage.setItem("sahayak_active_model", bestName);
+      localStorage.setItem("sahayak_active_provider", "ollama");
+      updateActiveBadge(bestName, "ok");
+      return;
+    }
+    // Ollama is running but no gemma4 model loaded
+    // Fall through to LM Studio check, then show error
+  } catch (_) { /* Ollama not running */ }
+
+  // 2. Try LM Studio
+  try {
+    const models = await bridgeLMStudioModels();
+    const gemma4Models = models.filter((m) => isGemma4Model(m.id || m.name || ""));
+    if (gemma4Models.length > 0) {
+      const bestName = gemma4Models[0].id || gemma4Models[0].name;
+      currentProviderKey = "lmstudio";
+      localStorage.setItem("sahayak_active_model", bestName);
+      localStorage.setItem("sahayak_active_provider", "lmstudio");
+      updateActiveBadge(bestName, "ok");
+      return;
+    }
+  } catch (_) { /* LM Studio not running */ }
+
+  // 3. No Gemma 4 model found
+  currentProviderKey = "";
+  localStorage.removeItem("sahayak_active_model");
+  localStorage.removeItem("sahayak_active_provider");
+  updateActiveBadge("no model", "err");
+  showNoModelError();
+}
+
+function showNoModelError() {
+  const es = $("#empty-state");
+  es.hidden = false;
+  es.innerHTML = `
+    <div class="no-model-banner">
+      <div class="no-model-icon">⚠️</div>
+      <h3>Gemma 4 not found</h3>
+      <p>Sahayak requires a <strong>Google Gemma 4</strong> model running locally.<br>
+         Start one of the following, then <button class="retry-btn" onclick="initializeProvider()">Retry</button></p>
+      <div class="no-model-options">
+        <div class="no-model-option">
+          <div class="no-model-option-title">🦙 Ollama</div>
+          <code>OLLAMA_ORIGINS='*' ollama serve</code><br>
+          <code>ollama pull gemma4:e2b</code>
+        </div>
+        <div class="no-model-option">
+          <div class="no-model-option-title">🤖 LM Studio</div>
+          Open LM Studio → Local Server → load a <strong>gemma-4</strong> model → Start Server
+        </div>
+      </div>
+    </div>`;
+  $("#thinking").hidden = true;
+  $("#report-shell").hidden = true;
+}
 function applyLang(l) {
   const dict = I18N[l] || I18N.en;
   document.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -346,16 +406,10 @@ function renderReport(data, patient) {
 /* ---------- run triage ---------- */
 $("#run").addEventListener("click", async () => {
   const btn = $("#run");
-  const topbarLabel = $("#topbar-model-label");
-  const modelName = topbarLabel ? topbarLabel.textContent.trim() : "";
 
-  // Guard: require a model to be selected
-  if (!modelName || modelName === "no model") {
-    const es = $("#empty-state");
-    es.hidden = false;
-    es.innerHTML = `<p style="color:#b45309;font-weight:700">⚠ No model selected — click the model name in the top bar to choose one</p>`;
-    $("#thinking").hidden = true;
-    $("#report-shell").hidden = true;
+  // Guard: require a Gemma 4 model to be running
+  if (!currentProviderKey) {
+    showNoModelError();
     return;
   }
 
@@ -374,27 +428,19 @@ Format the plan as concise markdown with short bullets. Do NOT use LaTeX math. U
 
   try {
     let data;
-    if (currentProviderKey === "chrome-ai") {
-      data = await triageChromeAI(user);
-    } else if (IS_REMOTE) {
-      // Remote host (Render): the server can't reach local Ollama, so go direct
+    if (currentProviderKey === "ollama") {
       data = await triageDirectOllama(user, p);
+    } else if (currentProviderKey === "lmstudio") {
+      data = await triageDirectLMStudio(user, p);
     } else {
-      const r = await fetch(`${API_BASE}/api/triage`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: user }] }),
-      });
-      data = await r.json();
-      // If server can't reach Ollama (e.g. ECONNREFUSED or no model), fall back to direct bridge
-      if (data && data.error && currentProviderKey === "ollama" && (localStorage.getItem("sahayak_active_model") || /Cannot reach|fetch failed|ECONNREFUSED/i.test(data.error))) {
-        try { data = await triageDirectOllama(user, p); } catch (_) { /* keep original error */ }
-      }
+      throw new Error("No Gemma 4 model available. Start Ollama or LM Studio with a gemma4 model.");
     }
     if (data && data.error && !data.trace?.length) throw new Error(data.error);
     renderReport(data, p);
   } catch (e) {
     $("#empty-state").hidden = false;
-    $("#empty-state").innerHTML = `<p style="color:#b91c1c">Error: ${escapeHtml(e.message)}</p>`;
+    $("#empty-state").innerHTML = `<p style="color:#b91c1c">Error: ${escapeHtml(e.message)}</p>
+      <p style="margin-top:8px"><button class="retry-btn" onclick="initializeProvider()">Re-detect model</button></p>`;
     $("#thinking").hidden = true;
     $("#report-shell").hidden = true;
   } finally {
@@ -412,544 +458,12 @@ function updateNet() {
 window.addEventListener("online", updateNet); window.addEventListener("offline", updateNet); updateNet();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
-/* ---------- model settings modal ---------- */
-const modelBtn         = $("#model-btn");
-const modelModal       = $("#model-modal");
-const modalClose       = $("#modal-close");
-const dlProgressWrap   = $("#dl-progress-wrap");
-const dlProgressFill   = $("#dl-progress-fill");
-const dlProgressLabel  = $("#dl-progress-label");
-const dlProgressSize   = $("#dl-progress-size");
-const dlProgressStatus = $("#dl-progress-status");
-
-const closeModal = () => (modelModal.hidden = true);
-modelBtn.addEventListener("click", () => {
-  modelModal.hidden = false;
-  // Pre-fill API base input with current value
-  const apiInput = $("#api-base-input");
-  if (apiInput) apiInput.value = API_BASE || "http://localhost:3000";
-  loadProviders();
-});
-modalClose.addEventListener("click", closeModal);
-modelModal.addEventListener("click", (e) => { if (e.target === modelModal) closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
-const refreshBtn = $("#refresh-models-btn");
-if (refreshBtn) refreshBtn.addEventListener("click", loadModels);
-
-/* ── API base URL save ── */
-const apiBaseSaveBtn = $("#api-base-save-btn");
-if (apiBaseSaveBtn) {
-  apiBaseSaveBtn.addEventListener("click", async () => {
-    const input = $("#api-base-input");
-    const statusEl = $("#api-base-status");
-    const val = (input?.value || "").trim().replace(/\/$/, "");
-    API_BASE = val;
-    localStorage.setItem("sahayak_api_base", val);
-    if (statusEl) { statusEl.textContent = "Testing…"; statusEl.className = "prov-status"; }
-    try {
-      const d = await safeJsonFetch("/api/health");
-      if (statusEl) { statusEl.textContent = `✓ Connected — model: ${d.model || "?"}  (${val || "relative"})`; statusEl.className = "prov-status ok"; }
-      if (d.model) updateActiveBadge(d.model);
-      loadModels();
-    } catch (e) {
-      if (statusEl) { statusEl.textContent = `✗ ${e.message}`; statusEl.className = "prov-status err"; }
-    }
-  });
-}
-
-/* ── Provider tab switching ── */
-document.querySelectorAll(".prov-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".prov-tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".prov-panel").forEach((p) => (p.hidden = true));
-    tab.classList.add("active");
-    const prov = tab.dataset.prov;
-    const panel = $(`#panel-${prov}`);
-    if (panel) panel.hidden = false;
-    if (prov === "ollama") loadModels();
-    else if (prov === "chrome-ai") detectChromeAI();
-    else if (prov === "lmstudio") probeServerProvider("lmstudio", "http://localhost:1234", "openai");
-    else if (prov === "jan") probeServerProvider("jan", "http://localhost:1337", "openai");
-  });
+// ── Auto-detect Gemma 4 provider on page load ──
+initializeProvider().catch((e) => {
+  updateActiveBadge("error", "err");
+  console.error("Provider init failed:", e);
 });
 
-/* Connect buttons */
-const lmstudioConnectBtn = $("#lmstudio-connect-btn");
-const janConnectBtn      = $("#jan-connect-btn");
-const customConnectBtn   = $("#custom-connect-btn");
-if (lmstudioConnectBtn) lmstudioConnectBtn.addEventListener("click", () => probeServerProvider("lmstudio", "http://localhost:1234", "openai"));
-if (janConnectBtn)      janConnectBtn.addEventListener("click",      () => probeServerProvider("jan", "http://localhost:1337", "openai"));
-if (customConnectBtn) {
-  customConnectBtn.addEventListener("click", () => {
-    const url = ($("#custom-url-input")?.value || "").trim();
-    if (!url) { const s = $("#custom-status"); if (s) { s.textContent = "Enter a URL first"; s.className = "prov-status err"; } return; }
-    probeServerProvider("custom", url, "openai");
-  });
-}
-
-async function safeJsonFetch(url, opts) {
-  const fullUrl = url.startsWith("/api") ? `${API_BASE}${url}` : url;
-  let r;
-  try {
-    r = await fetch(fullUrl, opts);
-  } catch (e) {
-    const target = API_BASE || "http://localhost:3000";
-    throw new Error(`Cannot reach Sahayak server at ${target} — run: npm start`);
-  }
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    throw new Error(`Sahayak server not running at ${API_BASE || "http://localhost:3000"} — run: npm start`);
-  }
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-  return data;
-}
-
-const RECOMMENDED_MODELS = [
-  { name: "gemma4:e2b", size: "~2.7 GB", desc: "Edge-optimised · phones & tablets" },
-  { name: "gemma4:e4b", size: "~4.9 GB", desc: "Better clinical reasoning · Snapdragon 7+", recommended: true },
-  { name: "gemma4:12b", size: "~8 GB",   desc: "High-end laptops & workstations" },
-  { name: "gemma4:27b", size: "~16 GB",  desc: "Maximum accuracy · GPU recommended" },
-];
-
-async function loadModels() {
-  const installedList = $("#installed-models-list");
-  const downloadCards = $("#download-cards");
-  const bridgeStatus  = $("#ollama-bridge-status");
-  installedList.innerHTML = '<div class="installed-empty">Loading…</div>';
-  downloadCards.innerHTML = "";
-  if (bridgeStatus) { bridgeStatus.textContent = ""; bridgeStatus.className = "prov-status"; }
-
-  let installedNames = new Set();
-  let currentName = "";
-  let useDirectBridge = IS_REMOTE; // On Render, always try direct bridge first
-
-  // Helper that renders the installed-models list from a raw array
-  const renderInstalled = (models, current, provider = "ollama") => {
-    if (!models.length) {
-      installedList.innerHTML = '<div class="installed-empty">No models installed — pull one below ↓</div>';
-      return;
-    }
-    installedList.innerHTML = models.map((m) => {
-      const sizeStr = m.size ? (m.size / 1e9).toFixed(1) + " GB" : "";
-      const isActive = m.name === current;
-      return `<div class="installed-item${isActive ? " is-active" : ""}">
-        <div class="installed-info">
-          <span class="installed-name">${escapeHtml(m.name)}</span>
-          ${sizeStr ? `<span class="installed-size">${sizeStr}</span>` : ""}
-          ${isActive ? '<span class="installed-tag">active</span>' : ""}
-        </div>
-        <div class="installed-actions">
-          ${!isActive ? `<button class="switch-inline-btn" data-model="${escapeHtml(m.name)}" data-prov="${provider}">Use</button>` : ""}
-          <button class="del-btn" data-model="${escapeHtml(m.name)}" title="Delete model">🗑</button>
-        </div>
-      </div>`;
-    }).join("");
-    installedList.querySelectorAll(".switch-inline-btn").forEach((b) =>
-      b.addEventListener("click", () => switchModel(b.dataset.model, b.dataset.prov || "ollama")));
-    installedList.querySelectorAll(".del-btn").forEach((b) =>
-      b.addEventListener("click", () => deleteModel(b.dataset.model, b)));
-  };
-
-  // ── PATH A: Direct browser → localhost:11434 (used on Render or as fallback) ──
-  const tryDirect = async () => {
-    const data = await bridgeOllamaTags();
-    const models = data.models || [];
-    installedNames = new Set(models.map((m) => m.name));
-    currentName = localStorage.getItem("sahayak_active_model") || (models[0] && models[0].name) || "";
-    if (currentName) updateActiveBadge(currentName);
-    renderInstalled(models, currentName);
-    if (bridgeStatus) { bridgeStatus.textContent = `✓ Connected · ${models.length} model${models.length !== 1 ? "s" : ""}`; bridgeStatus.className = "prov-status ok"; }
-    currentProviderKey = "ollama";
-  };
-
-  // ── PATH B: Server proxy (works on localhost) ──
-  const tryServer = async () => {
-    const data = await safeJsonFetch("/api/models");
-    const models = data.models || [];
-    installedNames = new Set(models.map((m) => m.name));
-    currentName = data.current || "";
-    if (currentName) updateActiveBadge(currentName);
-    if (models.length) {
-      renderInstalled(models, currentName);
-    } else if (data.error) {
-      installedList.innerHTML = `<div class="installed-empty err">⚠ Ollama not running — start with: <code>ollama serve</code></div>`;
-      throw new Error("ollama-down");
-    } else {
-      renderInstalled(models, currentName);
-    }
-  };
-
-  try {
-    if (useDirectBridge) {
-      try { await tryDirect(); }
-      catch (e) {
-        installedList.innerHTML = `<div class="installed-empty err">⚠ Can't reach local Ollama at <code>${escapeHtml(LOCAL_OLLAMA)}</code></div>`;
-        if (bridgeStatus) { bridgeStatus.textContent = "✗ Not reachable"; bridgeStatus.className = "prov-status err"; }
-        const hint = $("#model-ollama-hint");
-        if (hint) hint.textContent = IS_REMOTE ? "Start: OLLAMA_ORIGINS='*' ollama serve" : "Ollama not reachable";
-      }
-    } else {
-      try { await tryServer(); }
-      catch (e) {
-        // Server unreachable or Ollama down — try direct bridge as a fallback
-        try { await tryDirect(); }
-        catch (e2) {
-          installedList.innerHTML = `<div class="installed-empty err">⚠ ${escapeHtml(e.message)}</div>`;
-          const hint = $("#model-ollama-hint");
-          if (hint) hint.textContent = "Ollama not reachable";
-        }
-      }
-    }
-  } catch (e) {
-    installedList.innerHTML = `<div class="installed-empty err">⚠ ${escapeHtml(e.message)}</div>`;
-  }
-
-  // Always render download cards, marking installed ones
-  downloadCards.innerHTML = RECOMMENDED_MODELS.map((m) => {
-    const installed = installedNames.has(m.name);
-    return `<div class="dl-card${m.recommended ? " dl-card--featured" : ""}${installed ? " dl-card--installed" : ""}">
-      <div class="dl-info">
-        <div class="dl-name">${escapeHtml(m.name)}${m.recommended ? ' <span class="dl-recommended">★ Rec</span>' : ""}</div>
-        <div class="dl-desc">${m.size} · ${m.desc}</div>
-      </div>
-      ${installed
-        ? '<span class="dl-installed-badge">✓ Installed</span>'
-        : `<button class="dl-btn" data-model="${escapeHtml(m.name)}">↓ Pull</button>`}
-    </div>`;
-  }).join("");
-
-  downloadCards.querySelectorAll(".dl-btn").forEach((b) =>
-    b.addEventListener("click", () => startDownload(b.dataset.model, b)));
-}
-
-function updateActiveBadge(name) {
-  const badge = $("#active-model-badge");
-  const topbarLabel = $("#topbar-model-label");
-  const sub = document.querySelector(".sub");
-  if (badge) badge.textContent = name;
-  if (topbarLabel) topbarLabel.textContent = name;
-  if (sub) sub.textContent = `Offline IMCI triage · ${name}`;
-}
-
-async function switchModel(model, provider = "ollama") {
-  if (IS_REMOTE) {
-    // Direct mode: just remember the chosen model client-side
-    localStorage.setItem("sahayak_active_model", model);
-    localStorage.setItem("sahayak_active_provider", provider);
-    updateActiveBadge(model);
-    loadModels();
-    return;
-  }
-  try {
-    const data = await safeJsonFetch("/api/set-provider", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, model }),
-    });
-    if (data.ok) { updateActiveBadge(data.model); loadModels(); }
-    else alert(`Switch failed: ${data.error}`);
-  } catch (e) {
-    // Fallback to direct-bridge bookkeeping
-    localStorage.setItem("sahayak_active_model", model);
-    localStorage.setItem("sahayak_active_provider", provider);
-    updateActiveBadge(model);
-    loadModels();
-  }
-}
-
-async function deleteModel(name, btn) {
-  if (!confirm(`Delete "${name}" from Ollama?\nThis frees disk space. You can re-download anytime.`)) return;
-  btn.textContent = "⏳"; btn.disabled = true;
-  try {
-    if (IS_REMOTE) {
-      await bridgeOllamaDelete(name);
-    } else {
-      try {
-        const data = await safeJsonFetch(`/api/models/${encodeURIComponent(name)}`, { method: "DELETE" });
-        if (!data.ok) throw new Error(data.error || "Delete failed");
-      } catch (e) {
-        // Server unreachable — fall back to direct bridge
-        await bridgeOllamaDelete(name);
-      }
-    }
-    loadModels();
-  } catch (e) {
-    btn.textContent = "🗑"; btn.disabled = false;
-    alert(`Delete failed: ${e.message}`);
-  }
-}
-
-let dlActive = false;
-
-async function startDownload(model, btn) {
-  if (dlActive) return;
-  dlActive = true;
-  dlProgressWrap.hidden = false;
-  dlProgressFill.style.width = "2%";
-  dlProgressLabel.textContent = `Pulling ${model}…`;
-  dlProgressSize.textContent = "";
-  if (dlProgressStatus) dlProgressStatus.textContent = "Connecting to Ollama registry…";
-  const allDlBtns = () => document.querySelectorAll(".dl-btn");
-  allDlBtns().forEach((b) => (b.disabled = true));
-
-  // Direct bridge: stream from local Ollama /api/pull (NDJSON)
-  // Used on Render, and as a fallback on localhost if the Sahayak server is down.
-  const pullDirect = async () => {
-    const r = await bridgeOllamaFetch("/api/pull", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: model, stream: true }),
-    });
-    if (!r.ok) throw new Error(`Ollama HTTP ${r.status}`);
-    return r;
-  };
-
-  const pullViaServer = async () => {
-    const r = await fetch(`${API_BASE}/api/pull`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
-    });
-    if (!r.ok) {
-      const txt = await r.text();
-      throw new Error(`Server ${r.status}: ${txt}`);
-    }
-    return r;
-  };
-
-  try {
-    const r = IS_REMOTE ? await pullDirect() : await pullViaServer().catch(() => pullDirect());
-
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() || "";
-      for (const line of lines) {
-        const raw = line.replace(/^data:\s*/, "").trim();
-        if (!raw) continue;
-        try {
-          const msg = JSON.parse(raw);
-          if (msg.error) {
-            dlProgressLabel.textContent = `✗ ${msg.error}`;
-            if (dlProgressStatus) dlProgressStatus.textContent = "Check that Ollama is running: ollama serve";
-            dlActive = false; allDlBtns().forEach((b) => (b.disabled = false));
-            return;
-          }
-          if (typeof msg.completed === "number" && msg.total) {
-            const pct = Math.max(2, Math.round((msg.completed / msg.total) * 100));
-            dlProgressFill.style.width = pct + "%";
-            const mb = (v) => (v / 1048576).toFixed(0);
-            dlProgressSize.textContent = `${mb(msg.completed)} / ${mb(msg.total)} MB`;
-          }
-          if (msg.status) dlProgressLabel.textContent = msg.status;
-          if (dlProgressStatus && msg.digest) dlProgressStatus.textContent = msg.digest.slice(0, 28) + "…";
-          if (msg.status === "success") {
-            dlProgressFill.style.width = "100%";
-            dlProgressLabel.textContent = `✓ ${model} ready!`;
-            dlProgressSize.textContent = "";
-            if (dlProgressStatus) dlProgressStatus.textContent = "Tap Use in Installed Models to activate it.";
-            dlActive = false;
-            loadModels();
-            return;
-          }
-        } catch { /* partial JSON — skip */ }
-      }
-    }
-    dlActive = false; allDlBtns().forEach((b) => (b.disabled = false));
-  } catch (e) {
-    dlProgressLabel.textContent = `✗ ${e.message}`;
-    if (dlProgressStatus) dlProgressStatus.textContent = IS_REMOTE
-      ? `Start Ollama with CORS: OLLAMA_ORIGINS='*' ollama serve`
-      : "Check that Ollama is running: ollama serve";
-    dlActive = false; allDlBtns().forEach((b) => (b.disabled = false));
-  }
-}
-
-// Sync topbar label with server's current model on page load (no popup)
-safeJsonFetch("/api/health").then((d) => {
-  if (d.model) updateActiveBadge(d.model);
-  if (d.provider) currentProviderKey = d.provider;
-}).catch(() => {
-  const topbarLabel = $("#topbar-model-label");
-  if (topbarLabel && !topbarLabel.textContent.trim()) topbarLabel.textContent = "no model";
-});
-
-/* ── loadProviders: called when modal opens ── */
-async function loadProviders() {
-  // Always refresh the Ollama panel (active by default)
-  loadModels();
-  detectChromeAI();
-}
-
-/* ── Probe a server-side provider (LM Studio / Jan / Custom) ── */
-async function probeServerProvider(provId, baseUrl, _type) {
-  const statusEl  = $(`#${provId}-status`);
-  const modelsEl  = $(`#${provId}-models`);
-  const connectBtn = $(`#${provId}-connect-btn`);
-  if (statusEl)  { statusEl.textContent = "Connecting…"; statusEl.className = "prov-status"; }
-  if (connectBtn) connectBtn.disabled = true;
-
-  try {
-    const res = await safeJsonFetch(`/api/set-provider`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: provId, baseUrl }),
-    });
-    // Fetch the model list for this provider
-    const modData = await safeJsonFetch("/api/models");
-    const models = modData.models || [];
-
-    if (statusEl) { statusEl.textContent = `✓ Connected — ${models.length} model${models.length !== 1 ? "s" : ""} found`; statusEl.className = "prov-status ok"; }
-    currentProviderKey = provId;
-    updateActiveBadge(res.model || (models[0] && models[0].name) || provId);
-
-    if (modelsEl) {
-      if (models.length) {
-        modelsEl.hidden = false;
-        modelsEl.innerHTML = models.map((m) => `
-          <div class="installed-item${m.name === res.model ? " is-active" : ""}">
-            <div class="installed-info">
-              <span class="installed-name">${escapeHtml(m.name)}</span>
-              ${m.name === res.model ? '<span class="installed-tag">active</span>' : ""}
-            </div>
-            <div class="installed-actions">
-              ${m.name !== res.model ? `<button class="switch-inline-btn" data-model="${escapeHtml(m.name)}" data-prov="${provId}">Use</button>` : ""}
-            </div>
-          </div>`).join("");
-        modelsEl.querySelectorAll(".switch-inline-btn").forEach((b) =>
-          b.addEventListener("click", async () => {
-            await safeJsonFetch("/api/set-provider", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ provider: b.dataset.prov, model: b.dataset.model }),
-            });
-            updateActiveBadge(b.dataset.model);
-            probeServerProvider(provId, baseUrl, _type);
-          }));
-      } else {
-        modelsEl.hidden = false;
-        modelsEl.innerHTML = '<div class="installed-empty">No models found. Load a model in the app first.</div>';
-      }
-    }
-  } catch (e) {
-    if (statusEl) { statusEl.textContent = `✗ ${e.message}`; statusEl.className = "prov-status err"; }
-  } finally {
-    if (connectBtn) connectBtn.disabled = false;
-  }
-}
-
-/* ── Chrome Built-in AI (Gemini Nano) ── */
-function detectChromeAI() {
-  const statusEl  = $("#chrome-ai-status");
-  const actionsEl = $("#chrome-ai-actions");
-  if (!statusEl) return;
-
-  const newAPI = typeof window.LanguageModel !== "undefined";
-  const oldAPI = window.ai && window.ai.languageModel;
-  const supported = newAPI || oldAPI;
-
-  if (!supported) {
-    statusEl.textContent = "✗ Chrome Built-in AI not available in this browser";
-    statusEl.className = "prov-status err";
-    if (actionsEl) actionsEl.innerHTML = '<p class="modal-note" style="margin-top:8px">Requires Chrome 127+ with <code>chrome://flags/#prompt-api-for-gemini-nano</code> enabled.</p>';
-    return;
-  }
-
-  // Check availability
-  const checkAvailability = newAPI
-    ? () => window.LanguageModel.availability()
-    : () => window.ai.languageModel.capabilities().then((c) => c.available === "readily" ? "available" : c.available);
-
-  checkAvailability().then((avail) => {
-    const ready = avail === "readily" || avail === "available";
-    const downloading = avail === "after-download" || avail === "downloading";
-    if (ready) {
-      statusEl.textContent = "✓ Gemini Nano is ready on this device";
-      statusEl.className = "prov-status ok";
-      currentProviderKey = "chrome-ai";
-      updateActiveBadge("Gemini Nano (Chrome)");
-      if (actionsEl) actionsEl.innerHTML = '<button class="ghost-sm" id="chrome-ai-use-btn" style="margin-top:8px">Use Chrome AI for triage</button>';
-      const useBtn = $("#chrome-ai-use-btn");
-      if (useBtn) useBtn.addEventListener("click", () => {
-        currentProviderKey = "chrome-ai";
-        updateActiveBadge("Gemini Nano (Chrome)");
-        closeModal();
-      });
-    } else if (downloading) {
-      statusEl.textContent = "⏬ Gemini Nano is downloading — check back soon";
-      statusEl.className = "prov-status";
-    } else if (avail === "downloadable" || avail === "after-download") {
-      statusEl.textContent = "⬇ Gemini Nano can be downloaded to this browser (~1.5 GB)";
-      statusEl.className = "prov-status";
-      if (actionsEl) actionsEl.innerHTML = '<button class="primary-sm" id="chrome-ai-dl-btn" style="margin-top:8px">Download Gemini Nano</button>';
-      const dlBtn = $("#chrome-ai-dl-btn");
-      if (dlBtn) dlBtn.addEventListener("click", () => window.downloadChromeAIModel());
-    } else {
-      statusEl.textContent = `⚠ Status: ${avail}`;
-      statusEl.className = "prov-status err";
-    }
-  }).catch((e) => {
-    statusEl.textContent = `✗ ${e.message}`;
-    statusEl.className = "prov-status err";
-  });
-}
-
-/* ── Chrome AI triage (structured-prompt, no tool-calling) ── */
-async function triageChromeAI(userPrompt) {
-  const systemPrompt = `You are Sahayak, a WHO IMCI pediatric triage assistant for community health workers.
-Given a patient description, respond ONLY with valid JSON matching this schema exactly:
-{
-  "reply": "<brief triage plan in markdown, <120 words>",
-  "trace": [
-    { "tool": "assess_danger_signs",   "result": { "danger_signs": ["<sign1>", "<sign2>"] } },
-    { "tool": "triage_classify",       "result": { "level": "RED|YELLOW|GREEN", "reason": "<one line>" } },
-    { "tool": "weight_based_dose",     "result": { "drug": "<drug>", "dose": "<dose with unit>", "route": "<route>", "frequency": "<freq>" } },
-    { "tool": "generate_referral",     "result": { "urgency": "immediate|soon|routine", "note": "<referral text>" } }
-  ]
-}
-Only include trace tools that are relevant. triage_classify is always required.
-Do NOT include any text outside the JSON object. Do NOT wrap in markdown code blocks.`;
-
-  const newAPI = typeof window.LanguageModel !== "undefined";
-  let session;
-  if (newAPI) {
-    session = await window.LanguageModel.create({ systemPrompt });
-  } else {
-    session = await window.ai.languageModel.create({ systemPrompt });
-  }
-
-  const raw = await session.prompt(userPrompt);
-  session.destroy();
-
-  // 1. Strip markdown code fences (```json ... ``` or ``` ... ```)
-  let clean = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-
-  // 2. Find outermost { ... } using bracket counting (handles nested objects)
-  let jsonStr = null;
-  const start = clean.indexOf("{");
-  if (start !== -1) {
-    let depth = 0;
-    for (let i = start; i < clean.length; i++) {
-      if (clean[i] === "{") depth++;
-      else if (clean[i] === "}") { depth--; if (depth === 0) { jsonStr = clean.slice(start, i + 1); break; } }
-    }
-  }
-
-  if (jsonStr) {
-    try { return JSON.parse(jsonStr); } catch { /* fall through to fallback */ }
-  }
-
-  // 3. Fallback: Chrome AI returned plain text — extract urgency level and wrap it
-  const lvl = /\b(RED|YELLOW|GREEN)\b/i.exec(raw)?.[1]?.toUpperCase() || "GREEN";
-  return {
-    reply: raw.slice(0, 600),
-    trace: [
-      { tool: "triage_classify", result: { level: lvl, reason: "Assessed by Chrome AI" } },
-    ],
-  };
-}
 
 // ───────────── Direct Ollama triage (browser → localhost) ─────────────
 async function triageDirectOllama(userPrompt, patient) {
@@ -1008,71 +522,60 @@ Include only relevant trace tools. triage_classify is always required.`;
   };
 }
 
-// ───────────── Local Ollama URL test/save ─────────────
-(function wireOllamaUrlInput() {
-  const input = document.getElementById("ollama-url-input");
-  const btn = document.getElementById("ollama-url-save-btn");
-  const status = document.getElementById("ollama-bridge-status");
-  if (!input || !btn) return;
-  btn.addEventListener("click", async () => {
-    const url = (input.value || "").replace(/\/$/, "").trim();
-    if (!url) return;
-    LOCAL_OLLAMA = url;
-    localStorage.setItem("sahayak_local_ollama", url);
-    if (status) { status.textContent = "Testing…"; status.className = "bridge-status testing"; }
-    try {
-      const r = await fetch(`${url}/api/tags`, { method: "GET" });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const j = await r.json();
-      const count = (j?.models || []).length;
-      if (status) {
-        status.textContent = count > 0 ? `✓ Connected · ${count} model(s)` : "✓ Connected · no models yet";
-        status.className = "bridge-status ok";
-      }
-      loadModels();
-    } catch (e) {
-      if (status) {
-        status.innerHTML = `✗ Cannot reach <code>${escapeHtml(url)}</code> — ${escapeHtml(e.message)}.<br>Start Ollama with CORS: <code>OLLAMA_ORIGINS='*' ollama serve</code>`;
-        status.className = "bridge-status err";
-      }
-    }
-  });
-})();
+// ───────────── Direct LM Studio triage (browser → localhost:1234) ─────────────
+async function triageDirectLMStudio(userPrompt) {
+  const base = LOCAL_LMSTUDIO.replace(/\/$/, "");
+  // Find the active Gemma 4 model that was set during provider detection
+  const model = localStorage.getItem("sahayak_active_model") || "";
 
-// ───────────── Chrome AI download monitor enhancement ─────────────
-async function downloadChromeAIModel() {
-  const wrap = document.getElementById("chrome-dl-wrap");
-  const lbl = document.getElementById("chrome-dl-label");
-  const pctEl = document.getElementById("chrome-dl-pct");
-  const fill = document.getElementById("chrome-dl-fill");
-  if (!wrap || !lbl || !pctEl || !fill) return;
-  if (typeof window.LanguageModel === "undefined" && typeof window.ai === "undefined") {
-    alert("Chrome AI not available in this browser. Use Chrome 131+ or enable chrome://flags/#optimization-guide-on-device-model");
-    return;
-  }
-  wrap.hidden = false;
-  lbl.textContent = "Starting download…";
-  pctEl.textContent = "0%";
-  fill.style.width = "2%";
-  try {
-    const createFn = window.LanguageModel?.create || window.ai?.languageModel?.create;
-    const session = await createFn.call(window.LanguageModel || window.ai.languageModel, {
-      monitor(m) {
-        m.addEventListener("downloadprogress", (e) => {
-          const pct = Math.max(1, Math.round((e.loaded || 0) * 100));
-          fill.style.width = pct + "%";
-          pctEl.textContent = pct + "%";
-          lbl.textContent = "Downloading Gemini Nano…";
-        });
-      },
-    });
-    fill.style.width = "100%"; pctEl.textContent = "100%";
-    lbl.textContent = "✓ Chrome AI ready";
-    session.destroy?.();
-    // Re-probe so the UI shows it as available
-    if (typeof detectChromeAI === "function") detectChromeAI();
-  } catch (e) {
-    lbl.textContent = "✗ " + (e.message || e);
-  }
+  const systemPrompt = `You are Sahayak, a WHO IMCI pediatric triage assistant.
+Respond with VALID JSON ONLY in this exact shape (no prose, no markdown fences):
+{
+  "reply": "<one short clinician-facing summary>",
+  "trace": [
+    { "tool": "assess_danger_signs",   "result": { "danger_signs": ["<sign>"] } },
+    { "tool": "triage_classify",       "result": { "level": "RED|YELLOW|GREEN", "reason": "<one line>" } },
+    { "tool": "weight_based_dose",     "result": { "drug": "<drug>", "dose": "<dose>", "route": "<route>", "frequency": "<freq>" } },
+    { "tool": "generate_referral",     "result": { "urgency": "immediate|soon|routine", "note": "<referral text>" } }
+  ]
 }
-window.downloadChromeAIModel = downloadChromeAIModel;
+Include only relevant trace tools. triage_classify is always required.`;
+
+  const body = {
+    model: model || undefined,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user",   content: userPrompt },
+    ],
+    temperature: 0.2,
+    stream: false,
+  };
+
+  const r = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`LM Studio HTTP ${r.status}`);
+  const data = await r.json();
+  const raw = data?.choices?.[0]?.message?.content || "";
+
+  // Robust JSON extraction (same as Ollama path)
+  let clean = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  let jsonStr = null;
+  const start = clean.indexOf("{");
+  if (start !== -1) {
+    let depth = 0;
+    for (let i = start; i < clean.length; i++) {
+      if (clean[i] === "{") depth++;
+      else if (clean[i] === "}") { depth--; if (depth === 0) { jsonStr = clean.slice(start, i + 1); break; } }
+    }
+  }
+  if (jsonStr) { try { return JSON.parse(jsonStr); } catch {} }
+
+  const lvl = /\b(RED|YELLOW|GREEN)\b/i.exec(raw)?.[1]?.toUpperCase() || "GREEN";
+  return {
+    reply: raw.slice(0, 600) || "Triage complete.",
+    trace: [{ tool: "triage_classify", result: { level: lvl, reason: "Assessed via LM Studio (direct)." } }],
+  };
+}
